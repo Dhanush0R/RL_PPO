@@ -1,13 +1,9 @@
-# command line usage:
-
-# python main.py --task ppo                --> runs only PPO
-# python main.py --task compare_ppo        --> compares A2C, PPO, and Baseline
-# python main.py --task ablation_clip      --> sweeps PPO clipping parameter
-# python main.py --task ablation_batch     --> sweeps PPO minibatch size
-# python main.py --task ablation_entropy   --> sweeps PPO entropy coefficient
-# python main.py --task ablation_anneal    --> sweeps LR and Entropy annealing
-# python main.py --task all_ablations      --> runs all 4 ablation studies
-# python main.py --task all                --> runs EVERYTHING 
+# To run the algorithm comparison (Task 1): python main.py --task all_algos
+# To run the minibatch ablation (Task 2): python main.py --task ablation_batch
+# To run the entropy ablation (Task 2): python main.py --task ablation_entropy
+# To run the PPO step-by-step optimization (Task 3): python main.py --task ppo_opt
+# To run all tasks sequentially: python main.py --task all
+# python main.py --task quick ---> Runs a very quick smoke test of the All Algorithms comparison and PPO optimizations with reduced steps and seeds.
 
 import argparse
 import os
@@ -24,12 +20,15 @@ from joblib import Parallel, delayed
 
 warnings.filterwarnings("ignore")
 
+# importing all agorithms 
 try:
+    import reinforce
+    import ac
     import a2c
-    import ppo_naive
+    import dqn
     import ppo
 except ImportError as e:
-    print(f"[warn] Could not import one of the required PG modules: {e}")
+    print(f"[warn] Could not import one of the required modules: {e}")
 
 def run_pg(module, config, max_steps, seeds, workers):
     def _run(seed):
@@ -54,14 +53,12 @@ def plot(results: dict, title: str, filename: str, max_steps: int, outdir: str, 
             rewards = np.array(run_data[1], dtype=float)
             
             if len(steps) == 0:
-                print(f"  [warn] No data recorded for {label} in one of the seeds.")
                 continue
                 
             u_steps, idx = np.unique(steps, return_index=True)
             interp_r.append(np.interp(grid, u_steps, rewards[idx]))
 
         if not interp_r: 
-            print(f"  [error] Entire run '{label}' failed to generate valid data.")
             continue
 
         arr = np.array(interp_r)
@@ -90,7 +87,7 @@ def plot(results: dict, title: str, filename: str, max_steps: int, outdir: str, 
     out_path = os.path.join(outdir, f"{filename}.png")
     fig.savefig(out_path, bbox_inches="tight", dpi=300)
     plt.close(fig)
-    print(f"  Saved plot → {out_path}")
+    print(f"  saved plot in : {out_path}")
 
 def summary_table(results: dict, title: str):
     print(f"\n {title} Summary")
@@ -101,76 +98,149 @@ def summary_table(results: dict, title: str):
             if len(rewards) > 0:
                 finals.append(np.mean(rewards[-20:]) if len(rewards) >= 20 else np.mean(rewards))
         if finals:
-            print(f"  {label:<25}: {np.mean(finals):.1f} ± {np.std(finals):.1f}")
+            print(f"  {label:<35}: {np.mean(finals):.1f} ± {np.std(finals):.1f}")
         else:
-            print(f"  {label:<25}: FAILED TO RUN")
+            print(f"  {label:<35}: FAILED TO RUN")
 
-def add_baseline(results_dict, csv_path):
-    try:
-        df = pd.read_csv(csv_path)
-        b_steps = df["env_step"].tolist()
-        b_rewards = df["Episode_Return_smooth"].tolist()
-        results_dict["DQN Baseline (CSV)"] = [(b_steps, b_rewards)]
-    except FileNotFoundError:
-        pass
+# task 1: plots all algorithms 
+def run_all_algos(args):
+    print("\ntraining and comparing all algorithms...")
+    
+    cfg_reinforce = {"gamma": 0.99, "lr": 1e-3, "h": 128}
+    cfg_ac = {"gamma": 0.99, "actor_lr": 1e-4, "critic_lr": 1e-3, "h": 128, "entropy_coef": 0.01}
+    cfg_a2c = {"gamma": 0.99, "actor_lr": 1e-3, "critic_lr": 2e-3, "h": 128, "entropy_coef": 0.01}
+    cfg_dqn = {"tn_switch": True, "er_switch": True, "lr": 1e-4, "h": 256, "gamma": 0.99, "main_net_update_freq": 1, "e_decay": 0.9999, "e_start": 1.0, "e_min": 0.01, "start_learning_at": 5000, "target_u_freq": 5000, "buff_sz": 100000}
+    cfg_ppo = {"gamma": 0.99, "actor_lr": 3e-4, "critic_lr": 1e-3, "h": 128, "clip_eps": 0.2, "ppo_epochs": 4, "num_envs": 4, "rollout_steps": 128, "minibatch_size": 64, "entropy_coef": 0.0}
 
-def run_compare_ppo(args):
-    print("\nComparing A2C, PPO, and Baseline...")
-    config_a2c = {"gamma": 0.99, "actor_lr": 1e-3, "critic_lr": 2e-3, "h": 128, "entropy_coef": 0.01}
-    config_ppo = {"gamma": 0.99, "actor_lr": 3e-4, "critic_lr": 1e-3, "h": 128, "clip_eps": 0.2, "ppo_epochs": 4}
-    config_ppo_sota = {"gamma": 0.99, "actor_lr": 3e-4, "critic_lr": 1e-3, "h": 128, "clip_eps": 0.2, "ppo_epochs": 3, "num_envs": 4, "rollout_steps": 128, "minibatch_size": 64, "entropy_coef": 0.01}
+    res = {}
+    res["REINFORCE"] = run_pg(reinforce, cfg_reinforce, args.steps, args.seeds, args.workers)
+    res["Actor-Critic (AC)"] = run_pg(ac, cfg_ac, args.steps, args.seeds, args.workers)
+    res["A2C"] = run_pg(a2c, cfg_a2c, args.steps, args.seeds, args.workers)
+    res["DQN (TN + ER)"] = run_pg(dqn, cfg_dqn, args.steps, args.seeds, args.workers)
+    res["PPO (Clipped)"] = run_pg(ppo, cfg_ppo, args.steps, args.seeds, args.workers)
+    
+    plot(res, "Performance Comparison of All Algorithms — CartPole-v1", "all_algorithms", args.steps, args.outdir, args.window)
+    summary_table(res, "All Algorithms Comparison")
+
+# task 2: ablation studies on PPO minibatch size and entropy coefficient
+def run_ablation_batch(args):
+    print("\nrunning ablation: PPO minibatch Size")
+    base_cfg = {"gamma": 0.99, "actor_lr": 3e-4, "critic_lr": 1e-3, "h": 128, "clip_eps": 0.2, "ppo_epochs": 4, "num_envs": 4, "rollout_steps": 128, "entropy_coef": 0.01}
+    
+    batch_sizes = [64, 128, 256, 512]
+    res = {}
+    for size in batch_sizes:
+        cfg = base_cfg.copy()
+        cfg["minibatch_size"] = size
+        label = f"Minibatch Size: {size}"
+        print(f"  testing {label}")
+        res[label] = run_pg(ppo, cfg, args.steps, args.seeds, args.workers)
+        
+    plot(res, "PPO Ablation: Minibatch Size", "ablation_batch", args.steps, args.outdir, args.window)
+    summary_table(res, "Minibatch Ablation")
+
+def run_ablation_entropy(args):
+    print("\nrunning ablation: PPO entropy coefficient")
+    base_cfg = {"gamma": 0.99, "actor_lr": 3e-4, "critic_lr": 1e-3, "h": 128, "clip_eps": 0.2, "ppo_epochs": 4, "num_envs": 4, "rollout_steps": 128, "minibatch_size": 64}
+    
+    entropy_coeffs = [0.0, 0.01, 0.05, 0.1]
+    res = {}
+    for coef in entropy_coeffs:
+        cfg = base_cfg.copy()
+        cfg["entropy_coef"] = coef
+        label = f"Entropy Coef: {coef}"
+        print(f"  testing {label}")
+        res[label] = run_pg(ppo, cfg, args.steps, args.seeds, args.workers)
+        
+    plot(res, "PPO Ablation: Entropy Coefficient", "ablation_entropy", args.steps, args.outdir, args.window)
+    summary_table(res, "Entropy Ablation")
+
+#task 3: PPO optimization breakdown
+def run_optimization_comparison(args):
+    print("\nrunning PPO optimization breakdown")
+    base_cfg = {"gamma": 0.99, "actor_lr": 3e-4, "critic_lr": 1e-3, "h": 128, "clip_eps": 0.2, "ppo_epochs": 4, "num_envs": 4, "rollout_steps": 128}
     
     res = {}
-    res["A2C"] = run_pg(a2c, config_a2c, args.steps, args.seeds, args.workers)
-    res["PPO (Naive)"] = run_pg(ppo_naive, config_ppo, args.steps, args.seeds, args.workers)
-    res["PPO (SOTA)"] = run_pg(ppo, config_ppo_sota, args.steps, args.seeds, args.workers)
-    add_baseline(res, args.baseline_csv)
     
-    plot(res, "PPO vs A2C vs DQN Baseline — CartPole-v1", "compare_ppo", args.steps, args.outdir, args.window)
-    summary_table(res, "PPO Comparison")
+    # naive PPO (no minibatch, no norm)
+    print("  testing naive PPO")
+    cfg_1 = base_cfg.copy()
+    # 4 envs * 128 steps = 512 (one full batch) -->
+    cfg_1["minibatch_size"] = 512
+    cfg_1["norm_adv"] = False
+    cfg_1["entropy_coef"] = 0.0
+    res["1. Naive PPO (Clip + GAE)"] = run_pg(ppo, cfg_1, args.steps, args.seeds, args.workers)
+    
+    # naive + minibatch
+    print("  testing naive PPO + minibatch")
+    cfg_2 = base_cfg.copy()
+    cfg_2["minibatch_size"] = 64
+    cfg_2["norm_adv"] = False
+    cfg_2["entropy_coef"] = 0.0
+    res["2. Naive + Minibatch"] = run_pg(ppo, cfg_2, args.steps, args.seeds, args.workers)
+    
+    # naive + minibatch + normalization
+    print("  testing naive PPO + minibatch + normalization")
+    cfg_3 = base_cfg.copy()
+    cfg_3["minibatch_size"] = 64
+    cfg_3["norm_adv"] = True
+    cfg_3["entropy_coef"] = 0.0
+    res["3. Naive + Minibatch + Norm"] = run_pg(ppo, cfg_3, args.steps, args.seeds, args.workers)
+    
 
-def run_ablation_anneal(args):
-    print("\nRunning Ablation: Annealing (Learning Rate & Entropy)...")
-    base_cfg = {"gamma": 0.99, "actor_lr": 3e-4, "critic_lr": 1e-3, "h": 128, "clip_eps": 0.2, "ppo_epochs": 3, "num_envs": 4, "rollout_steps": 128, "minibatch_size": 128, "entropy_coef": 0.01}
-    res = {}
+    plot(res, "PPO Optimizations Comparison", "ppo_optimizations", args.steps, args.outdir, args.window)
+    summary_table(res, "PPO Optimizations Breakdown")
+
+def run_quick(args):
+    print("\n\nQuick Test\n\n")
     
-    print("  Testing Static LR & Entropy...")
-    cfg_static = base_cfg.copy()
-    res["Static (No Decay)"] = run_pg(ppo, cfg_static, args.steps, args.seeds, args.workers)
+    # 1. override arguments for a fast test
+    original_outdir = args.outdir
+    args.steps = 10_000
+    args.seeds = 2
+    args.workers = 2
+    args.outdir = os.path.join(args.outdir, "quick")
     
-    print("  Testing LR Annealing Only...")
-    cfg_lr = base_cfg.copy()
-    cfg_lr["anneal_lr"] = True
-    res["LR Decay Only"] = run_pg(ppo, cfg_lr, args.steps, args.seeds, args.workers)
+    print(f"  Running Quick Test: {args.steps:,} steps, {args.seeds} seeds...")
     
-    print("  Testing LR + Entropy Annealing...")
-    cfg_both = base_cfg.copy()
-    cfg_both["anneal_lr"] = True
-    cfg_both["anneal_entropy"] = True
-    res["LR + Entropy Decay"] = run_pg(ppo, cfg_both, args.steps, args.seeds, args.workers)
-    
-    plot(res, "Ablation: Annealing Strategies", "ablation_anneal", args.steps, args.outdir, args.window)
-    summary_table(res, "Annealing Ablation")
+    print("\n(quick) testing all algorithms comparison")
+    run_all_algos(args)
+    print("\n(quick) testing PPO optimizations")
+    run_optimization_comparison(args)
+    print(f"\n(quick) test done. plots successfully saved to '{args.outdir}/'")
+
+    args.outdir = original_outdir
 
 def get_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--task", type=str, default="compare_ppo")
+    p.add_argument("--task", type=str, default="all", choices=["all_algos", "ablation_batch", "ablation_entropy", "ppo_opt", "all", "quick"])
     p.add_argument("--steps", type=int, default=1_000_000)
     p.add_argument("--seeds", type=int, default=5)
     p.add_argument("--workers", type=int, default=5)
     p.add_argument("--outdir", type=str, default="plots")
     p.add_argument("--window", type=int, default=150)
-    p.add_argument("--baseline_csv", type=str, default="BaselineDataCartPole.csv")
+    
     return p.parse_args()
 
 def main():
     args = get_args()
+
+    if args.task == "quick":
+        run_quick(args)
+        return
+
     print(f"Steps: {args.steps:,} | Seeds: {args.seeds} | Workers: {args.workers}")
     
-    if args.task == "compare_ppo": run_compare_ppo(args)
-    if args.task == "ablation_anneal": run_ablation_anneal(args)
-    
-    print("\nExperiments completed!\n")
+    if args.task in ["all_algos", "all"]:
+        run_all_algos(args)
+    if args.task in ["ablation_batch", "all"]:
+        run_ablation_batch(args)
+    if args.task in ["ablation_entropy", "all"]:
+        run_ablation_entropy(args)
+    if args.task in ["ppo_opt", "all"]:
+        run_optimization_comparison(args)
+        
+    print("\nexperiments completed!\n")
 
 if __name__ == "__main__":
     main()
