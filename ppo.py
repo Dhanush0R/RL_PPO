@@ -35,13 +35,13 @@ def train_agent(config: dict, max_steps: int, seed: int,
     state_dim = envs.single_observation_space.shape[0]
     action_dim = envs.single_action_space.n
 
-    # --- Static Hyperparameters ---
+    #hyperparameters 
     hidden = config.get("h", 128)
     actor_lr = config.get("actor_lr", 3e-4) 
     critic_lr = config.get("critic_lr", 1e-3) 
     gamma = config.get("gamma", 0.99)
     gae_lambda = config.get("gae_lambda", 0.95)
-    entropy_coef = config.get("entropy_coef", 0.01) # Remains static throughout
+    entropy_coef = config.get("entropy_coef", 0.0)
     clip_eps = config.get("clip_eps", 0.2)
     
     ppo_epochs = config.get("ppo_epochs", 4)
@@ -52,7 +52,6 @@ def train_agent(config: dict, max_steps: int, seed: int,
     actor = PolicyNetwork(state_dim, action_dim, hidden)
     critic = ValueNetwork(state_dim, hidden)
 
-    # Learning rates remain completely static throughout training
     actor_optim = optim.Adam(actor.parameters(), lr=actor_lr, eps=1e-5)
     critic_optim = optim.Adam(critic.parameters(), lr=critic_lr, eps=1e-5)
     loss_fn = nn.MSELoss()
@@ -73,7 +72,7 @@ def train_agent(config: dict, max_steps: int, seed: int,
     with tqdm(total=max_steps, desc=f"PPO seed={seed}", leave=False, disable=not show_progress) as pbar:
         for update in range(num_updates):
             
-            # 1. Collect Fixed-Length Rollout
+            # fixed length rollout
             for step in range(rollout_steps):
                 total_steps += num_envs
                 obs[step] = next_obs
@@ -96,7 +95,7 @@ def train_agent(config: dict, max_steps: int, seed: int,
                 next_obs = torch.Tensor(next_obs_np)
                 next_done = torch.Tensor(terminated | truncated)
 
-                # Manual reward tracking
+                #reward tracking
                 current_ep_rewards += reward
                 dones_np = terminated | truncated
                 
@@ -108,11 +107,12 @@ def train_agent(config: dict, max_steps: int, seed: int,
                             
                 pbar.update(num_envs)
 
-            # 2. Compute GAE
+            # GAE
             with torch.no_grad():
                 next_value = critic(next_obs).squeeze(-1)
                 advantages = torch.zeros_like(rewards)
                 lastgaelam = 0
+                # traverseing backwards through the trajectory to compute advantages
                 for t in reversed(range(rollout_steps)):
                     if t == rollout_steps - 1:
                         nextnonterminal = 1.0 - next_done
@@ -134,7 +134,7 @@ def train_agent(config: dict, max_steps: int, seed: int,
 
             b_inds = np.arange(batch_size)
             
-            # 3. Optimize with Mini-batches
+            # mini - batches optimization
             for epoch in range(ppo_epochs):
                 np.random.shuffle(b_inds) 
                 
@@ -147,7 +147,8 @@ def train_agent(config: dict, max_steps: int, seed: int,
                     mb_logprobs = b_logprobs[mb_inds]
                     mb_returns = b_returns[mb_inds]
                     mb_advantages = b_advantages[mb_inds]
-
+                    
+                    # advantage normalization for optimization stability
                     if config.get("norm_adv", True):
                         mb_advantages = (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8)
 
@@ -157,13 +158,14 @@ def train_agent(config: dict, max_steps: int, seed: int,
                     entropy = dist.entropy().mean()
                     newvalue = critic(mb_obs).squeeze(-1)
 
+                    # ratio for clipping
                     logratio = newlogprob - mb_logprobs
                     ratio = logratio.exp()
 
                     surr1 = ratio * mb_advantages
                     surr2 = torch.clamp(ratio, 1.0 - clip_eps, 1.0 + clip_eps) * mb_advantages
                     
-                    # --- STATIC ENTROPY APPLIED HERE ---
+                    # actor and critic losses
                     actor_loss = -torch.min(surr1, surr2).mean() - (entropy_coef * entropy)
                     critic_loss = loss_fn(newvalue, mb_returns)
 

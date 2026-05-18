@@ -1,15 +1,9 @@
 # To run the algorithm comparison (Task 1): python main.py --task all_algos
-
 # To run the minibatch ablation (Task 2): python main.py --task ablation_batch
-
 # To run the entropy ablation (Task 2): python main.py --task ablation_entropy
-
 # To run the PPO step-by-step optimization (Task 3): python main.py --task ppo_opt
-
 # To run all tasks sequentially: python main.py --task all
-
-
-
+# python main.py --task quick ---> Runs a very quick smoke test of the All Algorithms comparison and PPO optimizations with reduced steps and seeds.
 
 import argparse
 import os
@@ -26,6 +20,7 @@ from joblib import Parallel, delayed
 
 warnings.filterwarnings("ignore")
 
+# importing all agorithms 
 try:
     import reinforce
     import ac
@@ -92,7 +87,7 @@ def plot(results: dict, title: str, filename: str, max_steps: int, outdir: str, 
     out_path = os.path.join(outdir, f"{filename}.png")
     fig.savefig(out_path, bbox_inches="tight", dpi=300)
     plt.close(fig)
-    print(f"  Saved plot → {out_path}")
+    print(f"  saved plot in : {out_path}")
 
 def summary_table(results: dict, title: str):
     print(f"\n {title} Summary")
@@ -107,15 +102,15 @@ def summary_table(results: dict, title: str):
         else:
             print(f"  {label:<35}: FAILED TO RUN")
 
-# --- Task 1: Plot All Algorithms ---
+# task 1: plots all algorithms 
 def run_all_algos(args):
-    print("\nTraining and Comparing All Algorithms...")
+    print("\ntraining and comparing all algorithms...")
     
     cfg_reinforce = {"gamma": 0.99, "lr": 1e-3, "h": 128}
     cfg_ac = {"gamma": 0.99, "actor_lr": 1e-4, "critic_lr": 1e-3, "h": 128, "entropy_coef": 0.01}
     cfg_a2c = {"gamma": 0.99, "actor_lr": 1e-3, "critic_lr": 2e-3, "h": 128, "entropy_coef": 0.01}
     cfg_dqn = {"tn_switch": True, "er_switch": True, "lr": 1e-4, "h": 256, "gamma": 0.99, "main_net_update_freq": 1, "e_decay": 0.9999, "e_start": 1.0, "e_min": 0.01, "start_learning_at": 5000, "target_u_freq": 5000, "buff_sz": 100000}
-    cfg_ppo = {"gamma": 0.99, "actor_lr": 3e-4, "critic_lr": 1e-3, "h": 128, "clip_eps": 0.2, "ppo_epochs": 4, "num_envs": 4, "rollout_steps": 128, "minibatch_size": 64, "entropy_coef": 0.01}
+    cfg_ppo = {"gamma": 0.99, "actor_lr": 3e-4, "critic_lr": 1e-3, "h": 128, "clip_eps": 0.2, "ppo_epochs": 4, "num_envs": 4, "rollout_steps": 128, "minibatch_size": 64, "entropy_coef": 0.0}
 
     res = {}
     res["REINFORCE"] = run_pg(reinforce, cfg_reinforce, args.steps, args.seeds, args.workers)
@@ -127,9 +122,9 @@ def run_all_algos(args):
     plot(res, "Performance Comparison of All Algorithms — CartPole-v1", "all_algorithms", args.steps, args.outdir, args.window)
     summary_table(res, "All Algorithms Comparison")
 
-# --- Task 2: Ablation Studies ---
+# task 2: ablation studies on PPO minibatch size and entropy coefficient
 def run_ablation_batch(args):
-    print("\nRunning Ablation: PPO Minibatch Size...")
+    print("\nrunning ablation: PPO minibatch Size")
     base_cfg = {"gamma": 0.99, "actor_lr": 3e-4, "critic_lr": 1e-3, "h": 128, "clip_eps": 0.2, "ppo_epochs": 4, "num_envs": 4, "rollout_steps": 128, "entropy_coef": 0.01}
     
     batch_sizes = [64, 128, 256, 512]
@@ -138,14 +133,14 @@ def run_ablation_batch(args):
         cfg = base_cfg.copy()
         cfg["minibatch_size"] = size
         label = f"Minibatch Size: {size}"
-        print(f"  Testing {label}...")
+        print(f"  testing {label}")
         res[label] = run_pg(ppo, cfg, args.steps, args.seeds, args.workers)
         
     plot(res, "PPO Ablation: Minibatch Size", "ablation_batch", args.steps, args.outdir, args.window)
     summary_table(res, "Minibatch Ablation")
 
 def run_ablation_entropy(args):
-    print("\nRunning Ablation: PPO Entropy Coefficient...")
+    print("\nrunning ablation: PPO entropy coefficient")
     base_cfg = {"gamma": 0.99, "actor_lr": 3e-4, "critic_lr": 1e-3, "h": 128, "clip_eps": 0.2, "ppo_epochs": 4, "num_envs": 4, "rollout_steps": 128, "minibatch_size": 64}
     
     entropy_coeffs = [0.0, 0.01, 0.05, 0.1]
@@ -154,66 +149,86 @@ def run_ablation_entropy(args):
         cfg = base_cfg.copy()
         cfg["entropy_coef"] = coef
         label = f"Entropy Coef: {coef}"
-        print(f"  Testing {label}...")
+        print(f"  testing {label}")
         res[label] = run_pg(ppo, cfg, args.steps, args.seeds, args.workers)
         
     plot(res, "PPO Ablation: Entropy Coefficient", "ablation_entropy", args.steps, args.outdir, args.window)
     summary_table(res, "Entropy Ablation")
 
-# --- Task 3: PPO Optimization Breakdown ---
+#task 3: PPO optimization breakdown
 def run_optimization_comparison(args):
-    print("\nRunning PPO Optimization Breakdown...")
+    print("\nrunning PPO optimization breakdown")
     base_cfg = {"gamma": 0.99, "actor_lr": 3e-4, "critic_lr": 1e-3, "h": 128, "clip_eps": 0.2, "ppo_epochs": 4, "num_envs": 4, "rollout_steps": 128}
     
     res = {}
     
-    # 1. Naive PPO (No minibatch, no norm, no entropy)
-    print("  Testing Naive PPO...")
+    # naive PPO (no minibatch, no norm)
+    print("  testing naive PPO")
     cfg_1 = base_cfg.copy()
-    cfg_1["minibatch_size"] = 512 # 4 envs * 128 steps = 512 (One full batch)
+    # 4 envs * 128 steps = 512 (one full batch) -->
+    cfg_1["minibatch_size"] = 512
     cfg_1["norm_adv"] = False
     cfg_1["entropy_coef"] = 0.0
     res["1. Naive PPO (Clip + GAE)"] = run_pg(ppo, cfg_1, args.steps, args.seeds, args.workers)
     
-    # 2. Naive + Minibatch
-    print("  Testing Naive PPO + Minibatch...")
+    # naive + minibatch
+    print("  testing naive PPO + minibatch")
     cfg_2 = base_cfg.copy()
     cfg_2["minibatch_size"] = 64
     cfg_2["norm_adv"] = False
     cfg_2["entropy_coef"] = 0.0
     res["2. Naive + Minibatch"] = run_pg(ppo, cfg_2, args.steps, args.seeds, args.workers)
     
-    # 3. Naive + Minibatch + Normalization
-    print("  Testing Naive PPO + Minibatch + Norm...")
+    # naive + minibatch + normalization
+    print("  testing naive PPO + minibatch + normalization")
     cfg_3 = base_cfg.copy()
     cfg_3["minibatch_size"] = 64
     cfg_3["norm_adv"] = True
     cfg_3["entropy_coef"] = 0.0
     res["3. Naive + Minibatch + Norm"] = run_pg(ppo, cfg_3, args.steps, args.seeds, args.workers)
     
-    # 4. Final PPO (All optimizations)
-    print("  Testing Final PPO (+ Entropy)...")
-    cfg_4 = base_cfg.copy()
-    cfg_4["minibatch_size"] = 64
-    cfg_4["norm_adv"] = True
-    cfg_4["entropy_coef"] = 0.01
-    res["4. Final PPO (All Optimizations)"] = run_pg(ppo, cfg_4, args.steps, args.seeds, args.workers)
 
-    plot(res, "PPO Engineering Optimizations Comparison", "ppo_optimizations", args.steps, args.outdir, args.window)
+    plot(res, "PPO Optimizations Comparison", "ppo_optimizations", args.steps, args.outdir, args.window)
     summary_table(res, "PPO Optimizations Breakdown")
+
+def run_quick(args):
+    print("\n\nQuick Test\n\n")
+    
+    # 1. override arguments for a fast test
+    original_outdir = args.outdir
+    args.steps = 10_000
+    args.seeds = 2
+    args.workers = 2
+    args.outdir = os.path.join(args.outdir, "quick")
+    
+    print(f"  Running Quick Test: {args.steps:,} steps, {args.seeds} seeds...")
+    
+    print("\n(quick) testing all algorithms comparison")
+    run_all_algos(args)
+    print("\n(quick) testing PPO optimizations")
+    run_optimization_comparison(args)
+    print(f"\n(quick) test done. plots successfully saved to '{args.outdir}/'")
+
+    args.outdir = original_outdir
 
 def get_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--task", type=str, default="all", choices=["all_algos", "ablation_batch", "ablation_entropy", "ppo_opt", "all"])
+    p.add_argument("--task", type=str, default="all", choices=["all_algos", "ablation_batch", "ablation_entropy", "ppo_opt", "all", "quick"])
     p.add_argument("--steps", type=int, default=1_000_000)
     p.add_argument("--seeds", type=int, default=5)
     p.add_argument("--workers", type=int, default=5)
     p.add_argument("--outdir", type=str, default="plots")
     p.add_argument("--window", type=int, default=150)
+    
     return p.parse_args()
 
 def main():
     args = get_args()
+
+    if args.task == "quick":
+        run_quick(args)
+        return
+
     print(f"Steps: {args.steps:,} | Seeds: {args.seeds} | Workers: {args.workers}")
     
     if args.task in ["all_algos", "all"]:
@@ -225,7 +240,7 @@ def main():
     if args.task in ["ppo_opt", "all"]:
         run_optimization_comparison(args)
         
-    print("\nExperiments completed!\n")
+    print("\nexperiments completed!\n")
 
 if __name__ == "__main__":
     main()
