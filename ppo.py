@@ -171,11 +171,13 @@ def train_agent(config: dict, max_steps: int, seed: int,
 
                     actor_optim.zero_grad()
                     actor_loss.backward()
+                    # global gradient norm constraint for actor
                     torch.nn.utils.clip_grad_norm_(actor.parameters(), 1.0)
                     actor_optim.step()
 
                     critic_optim.zero_grad()
                     critic_loss.backward()
+                    # global gradient norm constraint for critic
                     torch.nn.utils.clip_grad_norm_(critic.parameters(), 1.0)
                     critic_optim.step()
 
