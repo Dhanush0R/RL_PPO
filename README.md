@@ -1,6 +1,7 @@
 # RL Algorithm Comparison - CartPole-v1
 
 A reinforcement learning benchmark suite comparing REINFORCE, Actor-Critic (AC), A2C, DQN, and PPO on the CartPole-v1 environment, with ablation studies and step-by-step PPO optimization analysis.
+<img width="600" height="400" alt="image" src="https://github.com/user-attachments/assets/82f9cc31-dcc2-43ae-b6fc-9cdd7173c53b" />
 
 ---
 
